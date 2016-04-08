@@ -68,7 +68,6 @@ class Solver(object):
                 right = expression.right
                 if op in ('==', '!=', '<=', '>=', '<', '>'):
                     if op == '!=':
-                        print("Hi?")
                         result = bld._or(
                             self.compile(left < right),
                             self.compile(left > right),
@@ -97,7 +96,6 @@ class Solver(object):
                             low = right + 1
                         else:
                             assert False
-                        print(flattened, low, high)
                         result = bld.pseudo_boolean_constraint(
                             [(c, self.compile(t)) for c, t in flattened],
                             low, high
