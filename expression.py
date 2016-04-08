@@ -136,7 +136,7 @@ class Binary(Expression):
 
     def _evaluate(self, assignment, table):
         lv = evaluate(self.left, assignment, table)
-        rv = evaluate(self.left, assignment, table)
+        rv = evaluate(self.right, assignment, table)
         if self.operator == '+':
             return lv + rv
         elif self.operator == '-':
