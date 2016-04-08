@@ -264,22 +264,12 @@ class BDDBuilder(object):
         self.__cache[('_not', result)] = x
         return result
 
+    @cached
     def _xor(self, x, y):
-        key = ('_xor', x, y)
-        try:
-            return self.__cache[key]
-        except KeyError:
-            pass
-        keys = [key]
-        if isinstance(x, BDD) and isinstance(y, BDD):
-            keys.append(('_xor', y, x))
-        result = self._or(
+        return self._or(
             self._and(self._not(x), y),
             self._and(x, self._not(y)),
         )
-        for k in keys:
-            self.__cache[k] = result
-        return result
 
     def reduce(self, bdd, variable, value):
         key = ("reduce", bdd, variable, value)
@@ -332,19 +322,14 @@ class BDD(object):
     def __repr__(self):
         return "BDD(%r, %r, %r)" % (self.choice, self.iftrue, self.iffalse)
 
-    def reachable(self):
-        s = set()
-        self.__add_to_set(s)
-        s = sorted(s, key=lambda s: s.number)
-        return s
-
-    def __add_to_set(self, s):
-        if self in s:
-            return
-        s.add(self)
-        for c in (self.iftrue, self.iffalse):
-            if isinstance(c, BDD):
-                c.__add_to_set(s)
+    def evaluate(self, assignment):
+        current = self
+        while isinstance(current, BDD):
+            if assignment[current.choice]:
+                current = current.iftrue
+            else:
+                current = current.iffalse
+        return current
 
 
 def simplicity(bdd):

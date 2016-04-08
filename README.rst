@@ -19,6 +19,9 @@ This code exists for two reasons:
    x + y + z >= 2), and it was easier to write my own than to modify satispy to
    support them.
 
+It is probably full of bugs. I've tested bits of it but it isn't even close to
+thoroughly tested. I haven't even used Hypothesis on it yet!
+
 Anyway, as such it's in public if you want to look at it, and if you have a use
 case for it feel free to talk to me about productionizing it, but you have
 been warned.

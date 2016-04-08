@@ -1,5 +1,7 @@
-from bddbuilder import BDDBuilder
+from bddbuilder import BDDBuilder, CNFMapper, BDD
+from minisat import minisat
 import pytest
+from hypothesis import given, strategies as st, assume, example
 
 
 def test_normalize_and():
@@ -83,3 +85,31 @@ def test_simple_pbc(n):
     )
     assert builder.pseudo_boolean_constraint(
         formula, 0, n - 1) == builder._not(builder._and(*ts))
+
+
+@example(ls=[2, 1], m=2, n=3)
+@given(
+    st.lists(st.integers().filter(bool), min_size=1),
+    st.integers(), st.integers())
+def test_solutions_to_linear_constraints_satisfy_them(ls, m, n):
+    assume(m <= n)
+    builder = BDDBuilder()
+    bdd = builder.pseudo_boolean_constraint(
+        [(c, builder.variable(i)) for i, c in enumerate(ls)], m, n
+    )
+    assume(isinstance(bdd, BDD))
+    mapper = CNFMapper()
+    termvar = mapper.variable_for_term(bdd)
+    cnf = list(mapper.cnf)
+    cnf.append((termvar,))
+    solution = minisat(cnf)
+    assume(solution is not None)
+    assignment = {
+        v: mapper.remapped_variable(v) in solution
+        for v in bdd.variables
+    }
+    assert bdd.evaluate(assignment)
+    score = sum(
+        s for i, s in enumerate(ls) if i in bdd.variables and assignment[i]
+    )
+    assert m <= score <= n

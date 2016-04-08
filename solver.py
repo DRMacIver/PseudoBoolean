@@ -1,97 +1,18 @@
 from minisat import minisat
 from bddbuilder import BDDBuilder, CNFMapper
-from weakref import ref as weakref
+from expression import variable, Binary, is_arithmetic, Unary, Expression
 
 
 class Solver(object):
     def __init__(self, backend=minisat):
         self.backend = backend
         self.builder = BDDBuilder()
-        self.variables_by_name = {}
-        self.variables_by_index = []
+        self.names_to_indices = {}
+        self.indices_to_names = []
+        self.compile_cache = {}
 
-    def variable(self, name):
-        try:
-            return self.variables_by_name[name]
-        except KeyError:
-            pass
-        result = Variable(self, name, len(self.variables_by_name))
-        self.variables_by_name[name] = result
-        self.variables_by_index.append(result)
-        assert len(self.variables_by_name) == len(self.variables_by_index)
-        return result
-
-
-class Formula(object):
-    def __init__(self, solver):
-        self.__solver = weakref(solver)
-        self.__bdd = None
-
-    @property
-    def solver(self):
-        return self.__solver()
-
-    @property
-    def builder(self):
-        return self.solver.builder
-
-    def __and__(self, other):
-        if other is True:
-            return self
-        if other is False:
-            return False
-        return And(self, other)
-
-    @property
-    def bdd(self):
-        if self.__bdd is None:
-            self.__bdd = self._calc_bdd()
-        return self.__bdd
-
-    def _bracketed(self):
-        return "(%s)" % (self.__repr__(),)
-
-    def __invert__(self):
-        return Not(self)
-
-    def __mul__(self, other):
-        return to_expression(self.solver, self).__mul__(other)
-
-    def __rmul__(self, other):
-        return to_expression(self.solver, self).__rmul__(other)
-
-    def __add__(self, other):
-        return to_expression(self.solver, self).__add__(other)
-
-    def __radd__(self, other):
-        return to_expression(self.solver, self).__radd__(other)
-
-    def __sub__(self, other):
-        return to_expression(self.solver, self).__sub__(other)
-
-    def __rsub__(self, other):
-        return to_expression(self.solver, self).__rsub__(other)
-
-    def __eq__(self, other):
-        return to_expression(self.solver, self).__eq__(other)
-
-    def __ne__(self, other):
-        return to_expression(self.solver, self).__neq__(other)
-
-    def __lt__(self, other):
-        return to_expression(self.solver, self).__lt__(other)
-
-    def __gt__(self, other):
-        return to_expression(self.solver, self).__gt__(other)
-
-    def __le__(self, other):
-        return to_expression(self.solver, self).__le__(other)
-
-    def __ge__(self, other):
-        return to_expression(self.solver, self).__ge__(other)
-
-    def solve(self):
-        bdd = self.bdd
+    def solve(self, variable):
+        bdd = self.compile(variable)
         if bdd is True:
             return {}
         if bdd is False:
@@ -102,197 +23,156 @@ class Formula(object):
         termvar = mapper.variable_for_term(bdd)
         cnf = list(mapper.cnf)
         cnf.append((termvar,))
-        solution = self.solver.backend(cnf)
+        solution = self.backend(cnf)
         if solution is None:
             raise Unsatisfiable()
         relevant_variables = [
-            self.solver.variables_by_index[i] for i in bdd.variables]
+            (i, self.indices_to_names[i]) for i in bdd.variables]
         return {
-            v.name: mapper.remapped_variable(v.index) in solution
-            for v in relevant_variables
+            name: mapper.remapped_variable(index) in solution
+            for index, name in relevant_variables
         }
 
+    def compile(self, expression):
+        if isinstance(expression, bool):
+            return expression
 
-class Variable(Formula):
-    def __init__(self, solver, name, index):
-        super(Variable, self).__init__(solver)
-        self.name = name
-        self.index = index
+        key = id(expression)
+        try:
+            return self.compile_cache[key]
+        except KeyError:
+            pass
 
-    def _calc_bdd(self):
-        return self.builder.variable(self.index)
+        bld = self.builder
 
-    def __repr__(self):
-        return "variable(%r)" % (self.name,)
-
-    def _bracketed(self):
-        return self.__repr__()
-
-    def __bool__(self):
-        return self.bdd is True
-
-
-class And(Formula):
-    def __init__(self, left, right):
-        assert left.solver is right.solver
-        super(And, self).__init__(left.solver)
-        self.left = left
-        self.right = right
-
-    def _calc_bdd(self):
-        return self.builder._and(self.left.bdd, self.right.bdd)
-
-    def __repr__(self):
-        return "%s & %s" % (self.left._bracketed(), self.right._bracketed())
-
-
-class Not(Formula):
-    def __init__(self, base):
-        Formula.__init__(self, base.solver)
-        self.base = base
-
-    def _calc_bdd(self):
-        return self.builder._not(self.base.bdd)
-
-    def __repr__(self):
-        return "¬%s" % (self.base.bracketed,)
-
-    def _bracketed(self):
-        return self.__repr__()
-
-
-class IfThenElse(Formula):
-    def __init__(self, choice, iftrue, iffalse):
-        assert choice.solver == iftrue.solver == iffalse.solver
-        super(IfThenElse, self).__init__(choice.solver)
-        self.choice = choice
-        self.iftrue = iftrue
-        self.iffalse = iffalse
-
-    def _calc_bdd(self):
-        return self.builder.if_then_else(
-            self.choice.bdd, self.iftrue.bdd, self.iffalse.bdd
-        )
-
-    def __repr__(self):
-        return "if %s then %s else %s" % (
-            self.choice._bracketed(), self.iftrue._bracketed(),
-            self.iffalse._bracketed()
-        )
-
-
-class LinearConstraint(Formula):
-    def __init__(
-        self, solver, coefficients_and_terms, lower_bound, upper_bound
-    ):
-        super(LinearConstraint, self).__init__(solver)
-        assert isinstance(lower_bound, int)
-        assert isinstance(upper_bound, int)
-        self.coefficients_and_terms = tuple(map(tuple, coefficients_and_terms))
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-
-    def _calc_bdd(self):
-        return self.builder.pseudo_boolean_constraint(
-            [(c, t.bdd) for c, t in self.coefficients_and_terms],
-            self.lower_bound, self.upper_bound
-        )
-
-    def __repr__(self):
-        return "%r <= %s <= %r" % (
-            self.lower_bound,
-            ' + '.join(
-                '%s * %s' % (c, t._bracketed())
-                for c, t in self.coefficients_and_terms),
-            self.upper_bound,
-        )
-
-
-def to_expression(solver, value):
-    if isinstance(value, Formula):
-        assert value.solver is solver
-        return LinearExpression(value.solver, [(value, 1)], 0)
-    elif isinstance(value, LinearExpression):
-        return value
-    else:
-        assert isinstance(value, int)
-        return LinearExpression(solver, {}, value)
-
-
-class LinearExpression(object):
-    def __init__(self, solver, terms_to_coefficients, offset):
-        self.solver = solver
-        self.offset = offset
-        self.terms_to_coefficients = tuple(terms_to_coefficients)
-        self.upper_bound = sum(
-            max(0, v) for _, v in self.terms_to_coefficients
-        ) + offset
-        self.lower_bound = sum(
-            min(0, v) for _, v in self.terms_to_coefficients
-        ) + offset
-
-    def __add__(self, other):
-        other = to_expression(self.solver, other)
-        return LinearExpression(
-            self.solver,
-            self.terms_to_coefficients + other.terms_to_coefficients,
-            self.offset + other.offset,
-        )
-
-    def __sub__(self, other):
-        return self + (other * -1)
-
-    def __rsub__(self, other):
-        return (-1 * other) + self
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __mul__(self, other):
-        if not isinstance(other, int):
-            raise TypeError("Can only multiple expressions by integers")
-        return LinearExpression(self.solver, [
-            (k, v * other) for k, v in self.terms_to_coefficients
-        ], self.offset * other)
-
-    def __rmul__(self, other):
-        return self.__mul__(other)
-
-    def __le__(self, other):
-        if isinstance(other, int):
-            return LinearConstraint(
-                self.solver,
-                [(c, v) for v, c in self.terms_to_coefficients],
-                self.lower_bound - self.offset,
-                other - self.offset,
-            )
+        if isinstance(expression, variable):
+            try:
+                i = self.names_to_indices[expression.name],
+            except KeyError:
+                i = len(self.names_to_indices)
+                self.names_to_indices[expression.name] = i
+                self.indices_to_names.append(expression.name)
+            result = bld.variable(i)
+        elif isinstance(expression, Unary):
+            assert expression.operator == '~'
+            result = bld._not(self.compile(expression.term))
         else:
-            return (self - other) <= 0
+            assert isinstance(expression, Binary), expression
+            op = expression.operator
 
-    def __lt__(self, other):
-        return self <= other - 1
+            if (
+                is_arithmetic(expression.left) or
+                is_arithmetic(expression.right)
+            ):
+                left = expression.left
+                right = expression.right
+                if op in ('==', '!=', '<=', '>=', '<', '>'):
+                    if op == '!=':
+                        print("Hi?")
+                        result = bld._or(
+                            self.compile(left < right),
+                            self.compile(left > right),
+                        )
+                    else:
+                        if isinstance(right, Expression):
+                            left -= right
+                            right = 0
+                        flattened = self.__flatten_arithmetic(left)
+                        low = sum(
+                            min(0, c) for c, _ in flattened
+                        )
+                        high = sum(
+                            max(0, c) for c, _ in flattened
+                        )
+                        if op == '==':
+                            low = right
+                            high = right
+                        elif op == '<=':
+                            high = right
+                        elif op == '>=':
+                            low = right
+                        elif op == '<':
+                            high = right - 1
+                        elif op == '>':
+                            low = right + 1
+                        else:
+                            assert False
+                        print(flattened, low, high)
+                        result = bld.pseudo_boolean_constraint(
+                            [(c, self.compile(t)) for c, t in flattened],
+                            low, high
+                        )
+                else:
+                    for v in (left, right):
+                        if is_arithmetic(v):
+                            raise ValueError(
+                                "Cannot compile arithmetic expression %r" % (
+                                    expression
+                                ))
+                    assert False
+            else:
+                left = self.compile(expression.left)
+                right = self.compile(expression.right)
+                if op == '&':
+                    result = bld._and(left, right)
+                elif op == '|':
+                    result = bld._or(left, right)
+                elif op in ('^', '!='):
+                    result = bld._xor(left, right)
+                elif op == '==':
+                    result = bld._or(
+                        bld._and(left, right),
+                        bld._and(left, right),
+                    )
+                elif op == '<=':
+                    result = bld._or(bld._not(left), right)
+                elif op == '<':
+                    result = bld._and(bld._not(left), right)
+                elif op == '>=':
+                    result = bld._or(bld._not(right), left)
+                elif op == '>':
+                    result = bld._and(bld._not(right), left)
+                else:
+                    assert is_arithmetic(expression)
+                    raise ValueError(
+                        "Cannot compile arithmetic expression %r" % (
+                            expression))
+        self.compile_cache[key] = result
+        return result
 
-    def __ge__(self, other):
-        return ~self.__lt__(other)
-
-    def __gt__(self, other):
-        return ~self.__le__(other)
-
-    def __eq__(self, other):
-        if isinstance(other, int):
-            return LinearConstraint(
-                self.solver,
-                [(c, v) for v, c in self.terms_to_coefficients],
-                other - self.offset, other - self.offset
-            )
-        return self - other == 0
-
-    def __ne__(self, other):
-        res = self.__eq__(other)
-        if isinstance(res, bool):
-            return not res
-        else:
-            return ~res
+    def __flatten_arithmetic(self, value):
+        if not is_arithmetic(value):
+            return [(1, value)]
+        if isinstance(value, int):
+            return [(value, True)]
+        elif isinstance(value, Binary):
+            if value.operator == '+':
+                return self.__flatten_arithmetic(value.left) + \
+                    self.__flatten_arithmetic(value.right)
+            elif value.operator == '-':
+                return self.__flatten_arithmetic(value.left) + [
+                    (-c, t) for c, t in
+                    self.__flatten_arithmetic(value.right)]
+            elif value.operator == '*':
+                left = value.left
+                right = value.right
+                if isinstance(right, int):
+                    left, right = right, left
+                assert isinstance(left, int)
+                assert isinstance(right, Expression)
+                return [(left * c, t) for c, t in self.__flatten_arithmetic(
+                    right)]
+            else:
+                assert False
+        elif isinstance(value, Unary):
+            if value.operator == '+':
+                return self.__flatten_arithmetic(value.term)
+            elif value.operator == '-':
+                return [(-c, t) for c, t in self.__flatten_arithmetic(
+                    value.term
+                )]
+            else:
+                assert False
 
 
 class Unsatisfiable(Exception):
