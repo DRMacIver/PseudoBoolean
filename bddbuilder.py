@@ -9,7 +9,7 @@ def canonicalize(value):
 
 
 def cached(function):
-    cache_name = '__cache__%s__' % (function.__name__,)
+    cache_name = 'cache_for_%s__' % (function.__name__,)
 
     @wraps(function)
     def accept(self, *args):
@@ -17,8 +17,8 @@ def cached(function):
             cache = getattr(self, cache_name)
         except AttributeError:
             cache = {}
-            setattr(self, cache_name, {})
-        key = (function.__name__,) + canonicalize(args)
+            setattr(self, cache_name, cache)
+        key = canonicalize(args)
         try:
             return cache[key]
         except KeyError:
@@ -325,6 +325,20 @@ class BDD(object):
     def __repr__(self):
         return "BDD(%r, %r, %r)" % (self.choice, self.iftrue, self.iffalse)
 
+    def reachable(self):
+        s = set()
+        self.__add_to_set(s)
+        s = sorted(s, key=lambda s: s.number)
+        return s
+
+    def __add_to_set(self, s):
+        if self in s:
+            return
+        s.add(self)
+        for c in (self.iftrue, self.iffalse):
+            if isinstance(c, BDD):
+                c.__add_to_set(s)
+
 
 def simplicity(bdd):
     if isinstance(bdd, bool):
@@ -345,3 +359,61 @@ def gcd(a, *bs):
             b = a % b
             a = t
     return a
+
+
+class CNFMapper(object):
+    def __init__(self):
+        self.last_variable = 0
+        self.cnf = []
+        self.variables = set()
+
+    def next_variable(self):
+        self.last_variable += 1
+        return self.last_variable
+
+    @cached
+    def remapped_variable(self, variable):
+        assert variable not in self.variables
+        self.variables.add(variable)
+        result = self.next_variable()
+        return result
+
+    @cached
+    def false_var(self):
+        result = self.next_variable()
+        self.cnf.append((-result,))
+        return result
+
+    @cached
+    def true_var(self):
+        result = self.next_variable()
+        self.cnf.append((result,))
+        return result
+
+    @cached
+    def variable_for_term(self, term):
+        if term is True:
+            return self.true_var()
+        if term is False:
+            return self.false_var()
+        choice_var = self.remapped_variable(term.choice)
+        if term.iftrue is True and term.iffalse is False:
+            return choice_var
+        if term.iftrue is False and term.iffalse is True:
+            return -choice_var
+
+        termvar = self.next_variable()
+        truetermvar = self.variable_for_term(term.iftrue)
+        falsetermvar = self.variable_for_term(term.iffalse)
+
+        # Now we add cnf terms so that termvar = ite(choice_var, truetermvar,
+        # falsetermvar).
+
+        # ¬termvar v ite(choice_var, truetermvar, falsetermvar)
+        self.cnf.append((-termvar, -choice_var, truetermvar))
+        self.cnf.append((-termvar, choice_var, falsetermvar))
+
+        # termvar v ¬ite(choice_var, truetermvar, falsetermvar)
+        self.cnf.append((termvar, -choice_var, -truetermvar))
+        self.cnf.append((termvar, choice_var, -falsetermvar))
+        return termvar
