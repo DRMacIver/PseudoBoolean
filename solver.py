@@ -51,15 +51,26 @@ class Formula(object):
     def _bracketed(self):
         return "(%s)" % (self.__repr__(),)
 
+    def __invert__(self):
+        return Not(self)
+
     def __mul__(self, other):
-        if not isinstance(other, int):
-            raise TypeError("Cannot multiply formulae by %r of type %s" % (
-                other, type(other).__name__
-            ))
-        return LinearExpression(self.solver, {self: other}, 0)
+        return to_expression(self.solver, self).__mul__(other)
 
     def __rmul__(self, other):
-        return self.__mul__(other)
+        return to_expression(self.solver, self).__rmul__(other)
+
+    def __add__(self, other):
+        return to_expression(self.solver, self).__add__(other)
+
+    def __radd__(self, other):
+        return to_expression(self.solver, self).__radd__(other)
+
+    def __sub__(self, other):
+        return to_expression(self.solver, self).__sub__(other)
+
+    def __rsub__(self, other):
+        return to_expression(self.solver, self).__rsub__(other)
 
     def solve(self):
         bdd = self.bdd
@@ -117,6 +128,21 @@ class And(Formula):
         return "%s & %s" % (self.left._bracketed(), self.right._bracketed())
 
 
+class Not(Formula):
+    def __init__(self, base):
+        Formula.__init__(self, base.solver)
+        self.base = base
+
+    def _calc_bdd(self):
+        return self.builder._not(self.base.bdd)
+
+    def __repr__(self):
+        return "¬%s" % (self.base.bracketed,)
+
+    def _bracketed(self):
+        return self.__repr__()
+
+
 class IfThenElse(Formula):
     def __init__(self, choice, iftrue, iffalse):
         assert choice.solver == iftrue.solver == iffalse.solver
@@ -142,6 +168,8 @@ class LinearConstraint(Formula):
         self, solver, coefficients_and_terms, lower_bound, upper_bound
     ):
         super(LinearConstraint, self).__init__(solver)
+        assert isinstance(lower_bound, int)
+        assert isinstance(upper_bound, int)
         self.coefficients_and_terms = tuple(map(tuple, coefficients_and_terms))
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
@@ -192,17 +220,33 @@ class LinearExpression(object):
             base[k] = base.setdefault(k, 0) + v
         return LinearExpression(self.solver, base, self.offset + other.offset)
 
+    def __sub__(self, other):
+        return self + (other * -1)
+
+    def __rsub__(self, other):
+        return (-1 * other) + self
+
     def __radd__(self, other):
         return self.__add__(other)
 
+    def __mul__(self, other):
+        if not isinstance(other, int):
+            raise TypeError("Can only multiple expressions by integers")
+        return LinearExpression(self.solver, {
+            k: v * other for k, v in self.terms_to_coefficients.items()
+        }, self.offset * other)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
     def __eq__(self, other):
-        if isinstance(other, Formula):
-            return self.self - self.other == 0
-        return LinearConstraint(
-            self.solver,
-            [(c, v) for v, c in self.terms_to_coefficients.items()],
-            other, other
-        )
+        if isinstance(other, int):
+            return LinearConstraint(
+                self.solver,
+                [(c, v) for v, c in self.terms_to_coefficients.items()],
+                other, other
+            )
+        return self - other == 0
 
     def __ne__(self, other):
         res = self.__eq__(other)
