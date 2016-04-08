@@ -113,3 +113,11 @@ def test_solutions_to_linear_constraints_satisfy_them(ls, m, n):
         s for i, s in enumerate(ls) if i in bdd.variables and assignment[i]
     )
     assert m <= score <= n
+
+
+def test_strict_equality_ruling_out_one_variable():
+    builder = BDDBuilder()
+    v0 = builder.variable(0)
+    v1 = builder.variable(1)
+    pbc = builder.pseudo_boolean_constraint([(2, v0), (1, v1)], 1, 1)
+    assert pbc == builder._and(builder._not(v0), v1)

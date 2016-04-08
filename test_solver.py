@@ -94,7 +94,6 @@ def test_intervals_give_pseudo_boolean_constraints(ls, m, n):
     assert constraint == pseudo_boolean
 
 
-@example(ls=[-2, 2, 3], m=1, n=1, b=False)
 @given(
     st.lists(st.integers().filter(bool), min_size=1),
     st.integers(), st.integers(), st.booleans())

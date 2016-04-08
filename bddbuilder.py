@@ -181,10 +181,9 @@ class BDDBuilder(object):
             return False
         if total <= upper_bound and lower_bound <= 0:
             return forced
-        formula = normalized
         if isinstance(forced, BDD):
             normalized = []
-            for coefficient, term in normalized:
+            for coefficient, term in formula:
                 restricted = self._and(term, forced)
                 if simplicity(restricted) < simplicity(term):
                     if isinstance(restricted, bool):
