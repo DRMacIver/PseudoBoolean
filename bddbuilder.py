@@ -175,6 +175,7 @@ class BDDBuilder(object):
                 lower_bound <= 0 <= upper_bound,
                 forced
             )
+        formula = normalized
         total = sum(c for c, _ in formula)
         if total < lower_bound:
             return False
