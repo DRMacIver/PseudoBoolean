@@ -29,3 +29,9 @@ def test_equivalence_of_subtraction_and_negation():
     solver = Solver()
     x = solver.variable('x')
     assert (1 - x) == ~x == -1 * x + 1
+
+
+def test_solve_lower_bounds():
+    solver = Solver()
+    ts = [solver.variable(i) for i in range(10)]
+    (sum(ts) >= 5).solve()

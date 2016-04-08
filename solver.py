@@ -208,10 +208,10 @@ class LinearExpression(object):
         self.terms_to_coefficients = dict(terms_to_coefficients)
         self.upper_bound = sum(
             max(0, v) for v in self.terms_to_coefficients.values()
-        )
+        ) + offset
         self.lower_bound = sum(
             min(0, v) for v in self.terms_to_coefficients.values()
-        )
+        ) + offset
 
     def __add__(self, other):
         other = to_expression(self.solver, other)
@@ -239,12 +239,32 @@ class LinearExpression(object):
     def __rmul__(self, other):
         return self.__mul__(other)
 
+    def __le__(self, other):
+        if isinstance(other, int):
+            return LinearConstraint(
+                self.solver,
+                [(c, v) for v, c in self.terms_to_coefficients.items()],
+                self.lower_bound - self.offset,
+                other - self.offset,
+            )
+        else:
+            return (self - other) <= 0
+
+    def __lt__(self, other):
+        return self <= other - 1
+
+    def __ge__(self, other):
+        return ~self.__lt__(other)
+
+    def __gt__(self, other):
+        return ~self.__le__(other)
+
     def __eq__(self, other):
         if isinstance(other, int):
             return LinearConstraint(
                 self.solver,
                 [(c, v) for v, c in self.terms_to_coefficients.items()],
-                other, other
+                other - self.offset, other - self.offset
             )
         return self - other == 0
 
