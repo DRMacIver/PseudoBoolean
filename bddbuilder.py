@@ -158,10 +158,11 @@ class BDDBuilder(object):
                 lower_bound += coefficient
                 upper_bound += coefficient
             if coefficient > upper_bound:
-                forced = self._and(forced, term)
+                forced = self._and(forced, self._not(term))
                 if forced is False:
                     return False
-            normalized.append((coefficient, term))
+            else:
+                normalized.append((coefficient, term))
         if not normalized:
             return self._and(
                 lower_bound <= 0 <= upper_bound,

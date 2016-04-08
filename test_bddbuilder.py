@@ -46,15 +46,40 @@ def test_reduce_and(i):
     assert builder.reduce(x, i, False) is False
 
 
-def test_simple_pbc():
+def test_unary_pbc():
     builder = BDDBuilder()
-    ts = [builder.variable(i) for i in range(10)]
+    x = builder.variable(0)
+    assert builder.pseudo_boolean_constraint([(1, x)], 0, 1) is True
+    assert builder.pseudo_boolean_constraint([(2, x)], 0, 1) is builder._not(x)
+
+
+def test_binary_pbc():
+    builder = BDDBuilder()
+    x = builder.variable(0)
+    y = builder.variable(1)
+    xandy = builder.pseudo_boolean_constraint(
+        [(1, x), (1, y)], 2, 3
+    )
+    assert xandy == builder._and(x, y)
+    xory = builder.pseudo_boolean_constraint(
+        [(1, x), (1, y)], 1, 2
+    )
+    assert xory == builder._or(x, y)
+    z = builder.pseudo_boolean_constraint(
+        [(1, x), (1, y)], 0, 1
+    )
+    assert z == builder._not(builder._and(x, y))
+
+
+@pytest.mark.parametrize('n', range(1, 10))
+def test_simple_pbc(n):
+    builder = BDDBuilder()
+    ts = [builder.variable(i) for i in range(n)]
     formula = [(1, t) for t in ts]
 
-    assert builder.pseudo_boolean_constraint(formula, 0, 10) is True
-    assert builder.pseudo_boolean_constraint(formula, 1, 10) == builder._or(
+    assert builder.pseudo_boolean_constraint(formula, 0, n) is True
+    assert builder.pseudo_boolean_constraint(formula, 1, n) == builder._or(
         *ts
     )
-    assert builder.pseudo_boolean_constraint(formula, 0, 9) == builder._not(
-        builder._and(*ts)
-    )
+    assert builder.pseudo_boolean_constraint(
+        formula, 0, n - 1) == builder._not(builder._and(*ts))
