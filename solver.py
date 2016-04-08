@@ -72,6 +72,24 @@ class Formula(object):
     def __rsub__(self, other):
         return to_expression(self.solver, self).__rsub__(other)
 
+    def __eq__(self, other):
+        return to_expression(self.solver, self).__eq__(other)
+
+    def __ne__(self, other):
+        return to_expression(self.solver, self).__neq__(other)
+
+    def __lt__(self, other):
+        return to_expression(self.solver, self).__lt__(other)
+
+    def __gt__(self, other):
+        return to_expression(self.solver, self).__gt__(other)
+
+    def __le__(self, other):
+        return to_expression(self.solver, self).__le__(other)
+
+    def __ge__(self, other):
+        return to_expression(self.solver, self).__ge__(other)
+
     def solve(self):
         bdd = self.bdd
         if bdd is True:
@@ -193,7 +211,7 @@ class LinearConstraint(Formula):
 def to_expression(solver, value):
     if isinstance(value, Formula):
         assert value.solver is solver
-        return LinearExpression(value.solver, {value: 1}, 0)
+        return LinearExpression(value.solver, [(value, 1)], 0)
     elif isinstance(value, LinearExpression):
         return value
     else:
@@ -205,20 +223,21 @@ class LinearExpression(object):
     def __init__(self, solver, terms_to_coefficients, offset):
         self.solver = solver
         self.offset = offset
-        self.terms_to_coefficients = dict(terms_to_coefficients)
+        self.terms_to_coefficients = tuple(terms_to_coefficients)
         self.upper_bound = sum(
-            max(0, v) for v in self.terms_to_coefficients.values()
+            max(0, v) for _, v in self.terms_to_coefficients
         ) + offset
         self.lower_bound = sum(
-            min(0, v) for v in self.terms_to_coefficients.values()
+            min(0, v) for _, v in self.terms_to_coefficients
         ) + offset
 
     def __add__(self, other):
         other = to_expression(self.solver, other)
-        base = dict(self.terms_to_coefficients)
-        for k, v in other.terms_to_coefficients.items():
-            base[k] = base.setdefault(k, 0) + v
-        return LinearExpression(self.solver, base, self.offset + other.offset)
+        return LinearExpression(
+            self.solver,
+            self.terms_to_coefficients + other.terms_to_coefficients,
+            self.offset + other.offset,
+        )
 
     def __sub__(self, other):
         return self + (other * -1)
@@ -232,9 +251,9 @@ class LinearExpression(object):
     def __mul__(self, other):
         if not isinstance(other, int):
             raise TypeError("Can only multiple expressions by integers")
-        return LinearExpression(self.solver, {
-            k: v * other for k, v in self.terms_to_coefficients.items()
-        }, self.offset * other)
+        return LinearExpression(self.solver, [
+            (k, v * other) for k, v in self.terms_to_coefficients
+        ], self.offset * other)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -243,7 +262,7 @@ class LinearExpression(object):
         if isinstance(other, int):
             return LinearConstraint(
                 self.solver,
-                [(c, v) for v, c in self.terms_to_coefficients.items()],
+                [(c, v) for v, c in self.terms_to_coefficients],
                 self.lower_bound - self.offset,
                 other - self.offset,
             )
@@ -263,7 +282,7 @@ class LinearExpression(object):
         if isinstance(other, int):
             return LinearConstraint(
                 self.solver,
-                [(c, v) for v, c in self.terms_to_coefficients.items()],
+                [(c, v) for v, c in self.terms_to_coefficients],
                 other - self.offset, other - self.offset
             )
         return self - other == 0

@@ -35,3 +35,12 @@ def test_solve_lower_bounds():
     solver = Solver()
     ts = [solver.variable(i) for i in range(10)]
     (sum(ts) >= 5).solve()
+
+
+def test_solve_ordering_between_variables():
+    solver = Solver()
+    x = solver.variable('x')
+    y = solver.variable('y')
+    t = (x < y).solve()
+    assert t['x'] is False
+    assert t['y'] is True

@@ -137,6 +137,13 @@ class BDDBuilder(object):
         if not formula:
             return lower_bound <= 0 <= upper_bound
 
+        add_up = {}
+        for c, t in formula:
+            add_up[t] = add_up.setdefault(t, 0) + c
+        formula = [
+            (c, t) for t, c in add_up.items()
+        ]
+
         formula.sort(
             key=lambda ct: (-abs(ct[0]), simplicity(ct[1]))
         )
