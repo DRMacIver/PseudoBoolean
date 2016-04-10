@@ -6,6 +6,7 @@ class ExpressionOptimizer(object):
     def __init__(self):
         self.__canonicalization_table = WeakKeyDictionary()
         self.__decision_tree = [frozenset(), [FALSE], [TRUE]]
+        self.__canon_counter = 0
 
     def variable(self, number):
         return self.canonicalize(Variable(number))
@@ -88,6 +89,10 @@ class ExpressionOptimizer(object):
                         node = iffalse
                 assert len(node) == 1
                 candidate = node[0]
+                if candidate.canon_counter < self.__canon_counter:
+                    candidate.canon_counter = self.__canon_counter
+                    candidate = candidate.patch()
+                    node[0] = candidate
                 assert value != candidate
                 experiment = distinguish(candidate, value)
                 if experiment is not None:
@@ -107,8 +112,10 @@ class ExpressionOptimizer(object):
                     # Are equivalent
                     if value < candidate:
                         candidate.root = value
+                        self.__canon_counter += 1
                         candidate.canonical = False
                         value.canonical = True
+                        value.canon_counter = self.__canon_counter
                         node[0] = value
                         self.__canonicalization_table[
                             value] = weakref(value)
@@ -125,6 +132,7 @@ class ExpressionOptimizer(object):
 class Term(object):
     root = None
     canonical = False
+    canon_counter = -1
 
     def evaluate(self, assignment, table=None):
         if table is None:
@@ -150,6 +158,12 @@ class Term(object):
         for r in reroot:
             r.root = current
         return current
+
+    def patch(self):
+        return self.reroot()._patch()
+
+    def _patch(self):
+        return self
 
     def __le__(self, other):
         return self.cmp(other) <= 0
@@ -308,11 +322,26 @@ class Not(Term):
     def __hash__(self):
         return ~hash(self.expression)
 
+    def patch(self):
+        if self.expression.root is None:
+            return self
+        newexpression = self.expression.patch()
+        assert newexpression is not self.expression
+        if newexpression is FALSE:
+            return TRUE
+        if newexpression is TRUE:
+            return FALSE
+        if isinstance(newexpression, Not):
+            return newexpression.expression
+        self.expression = newexpression
+        return self
+
     def add_to_table(self, table):
         if self in table:
             return
-        self.expression.add_to_table(table)
-        table[self] = frozenset([self.expression]) | table[self.expression]
+        exp = self.expression
+        exp.add_to_table(table)
+        table[self] = frozenset([exp]) | table[exp]
 
 
 class And(Term):
@@ -353,6 +382,21 @@ class And(Term):
         l.add_to_table(table)
         r.add_to_table(table)
         table[self] = frozenset({l, r}) | table[l] | table[r]
+
+    def patch(self):
+        if self.left.root is None and self.right.root is None:
+            return self
+        nl = self.left.patch()
+        nr = self.right.patch()
+        if nl is FALSE or nr is FALSE:
+            return FALSE
+        if nl is TRUE:
+            return nr
+        if nr is TRUE:
+            return nl
+        self.left = nl
+        self.right = nr
+        return self
 
 
 def distinguish(x, y):

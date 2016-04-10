@@ -33,7 +33,6 @@ def minisat(clauses):
                 '%s 0\n' % (' '.join(map(str, c)),)
             )
         satfile.close()
-
         try:
             subprocess.check_output([
                 "minisat", "-mem-lim=500", satfilename, outfilename,
