@@ -29,7 +29,7 @@ def cached(function):
     return accept
 
 
-class BDDBuilder(object):
+class DiagramBuilder(object):
     def __init__(self):
         self.__cache = {}
         self.__id_counter = 0
@@ -55,7 +55,7 @@ class BDDBuilder(object):
             if reducediftrue == reducediffalse:
                 result = reducediftrue
             else:
-                result = BDD(
+                result = IfThenElse(
                     self.__id_counter,
                     choice, reducediftrue, reducediffalse)
         for k in (key, otherkey):
@@ -74,8 +74,7 @@ class BDDBuilder(object):
             return False
 
         terms = [t for t in terms if t is not True]
-        terms.sort(key=lambda x: (
-            len(x.variables), sorted(x.variables), x.number))
+        terms.sort(key=NodeKey)
         key = ('_and', tuple(terms))
         try:
             return self.__cache[key]
@@ -105,8 +104,8 @@ class BDDBuilder(object):
         elif y is True:
             result = x
         else:
-            assert isinstance(x, BDD)
-            assert isinstance(y, BDD)
+            assert isinstance(x, GraphNode)
+            assert isinstance(y, GraphNode)
             if x is y:
                 result = x
             else:
@@ -145,7 +144,7 @@ class BDDBuilder(object):
         ]
 
         formula.sort(
-            key=lambda ct: (-abs(ct[0]), simplicity(ct[1]))
+            key=lambda ct: (-abs(ct[0]), NodeKey(ct[1]))
         )
 
         normalized = []
@@ -181,11 +180,11 @@ class BDDBuilder(object):
             return False
         if total <= upper_bound and lower_bound <= 0:
             return forced
-        if isinstance(forced, BDD):
+        if isinstance(forced, GraphNode):
             normalized = []
             for coefficient, term in formula:
                 restricted = self._and(term, forced)
-                if simplicity(restricted) < simplicity(term):
+                if comparenodes(restricted, term) < 0:
                     if isinstance(restricted, bool):
                         if restricted:
                             lower_bound -= coefficient
@@ -213,7 +212,7 @@ class BDDBuilder(object):
             upper_bound //= divide_by
             formula = [(c // divide_by, t) for c, t in formula]
         formula.sort(
-            key=lambda ct: (-abs(ct[0]), simplicity(ct[1]))
+            key=lambda ct: (-abs(ct[0]), NodeKey(ct[1]))
         )
         return self._and(
             forced,
@@ -279,7 +278,7 @@ class BDDBuilder(object):
             pass
         if isinstance(bdd, bool):
             result = bdd
-        elif variable not in bdd.variables:
+        elif variable < bdd.minvar:
             result = bdd
         elif variable == bdd.choice:
             if value:
@@ -292,54 +291,146 @@ class BDDBuilder(object):
                 self.reduce(bdd.iftrue, variable, value),
                 self.reduce(bdd.iffalse, variable, value),
             )
-        if isinstance(result, BDD):
-            assert variable not in result.variables
         self.__cache[key] = result
         return result
 
 
-class BDD(object):
+class GraphNode(object):
+    # Required properties: root, minvar, canonical
+
+    def variables(self):
+        result = set()
+        table = set()
+        self.add_variables_to_set(result, table)
+        return result
+
+    def add_variables_to_set(self, result, table):
+        if self in table:
+            return
+        result.add(self.minvar)
+        for c in self.children():
+            c.add_variables_to_set(result, table)
+
+    def best_version(self):
+        seen = []
+        root = self
+        while isinstance(root, GraphNode) and root.root is not None:
+            seen.append(root)
+            root = root.root
+        for s in seen:
+            s.root = root
+        return root
+
+    def merge(self, other):
+        selfroot = self.best_version()
+        otherroot = other.best_version()
+        if selfroot != otherroot:
+            if comparenodes(selfroot, otherroot) < 0:
+                otherroot.root = selfroot
+            else:
+                selfroot.root = otherroot
+
+    def evaluate(self, assignment, table=None):
+        if table is None:
+            table = {}
+        try:
+            return table[self]
+        except KeyError:
+            pass
+        self = self.best_version()
+        result = self._evaluate(assignment, table)
+        table[self] = result
+        return result
+
+
+class IfThenElse(GraphNode):
     def __init__(self, number, choice, iftrue, iffalse):
         self.number = number
         self.choice = choice
         self.iftrue = iftrue
         self.iffalse = iffalse
-        variables = set()
-        if isinstance(iftrue, BDD):
+        self.canonical = True
+        self.root = None
+        if isinstance(iftrue, GraphNode):
             assert choice < iftrue.choice
-            variables.update(iftrue.variables)
-        if isinstance(iffalse, BDD):
+            self.canonical = self.canonical and iftrue.canonical
+        if isinstance(iffalse, GraphNode):
             assert choice < iffalse.choice
-            variables.update(iffalse.variables)
-        assert choice not in variables
-        variables.add(choice)
-        self.variables = frozenset(variables)
+            self.canonical = self.canonical and iffalse.canonical
 
     @property
-    def builder(self):
-        return self.__builder()
+    def minvar(self):
+        return self.choice
+
+    def children(self):
+        for v in (self.iftrue, self.iffalse):
+            if isinstance(v, GraphNode):
+                yield v
 
     def __repr__(self):
-        return "BDD(%r, %r, %r)" % (self.choice, self.iftrue, self.iffalse)
+        return "IfThenElse(%r, %r, %r)" % (
+            self.choice, self.iftrue, self.iffalse)
 
-    def evaluate(self, assignment):
-        current = self
-        while isinstance(current, BDD):
-            if assignment[current.choice]:
-                current = current.iftrue
-            else:
-                current = current.iffalse
-        return current
+    def _evaluate(self, assignment, table):
+        child = self.iftrue if assignment[self.choice] else self.iffalse
+        if isinstance(child, bool):
+            return child
+        return child.evaluate(assignment, table)
 
 
-def simplicity(bdd):
-    if isinstance(bdd, bool):
-        return (0, bdd)
-    else:
-        return (
-            1, len(bdd.variables), sorted(bdd.variables),
-            bdd.number,
-        )
+def comparenodes(left, right):
+    if isinstance(left, bool):
+        if isinstance(right, bool):
+            return right - left
+        else:
+            return -1
+    if isinstance(right, bool):
+        return 1
+    if left.canonical > right.canonical:
+        return -1
+    if right.canonical > left.canonical:
+        return 1
+    assert isinstance(left, IfThenElse)
+    assert isinstance(right, IfThenElse)
+    if left.minvar < right.minvar:
+        return -1
+    if right.minvar < left.minvar:
+        return 1
+    assert left.minvar == right.minvar
+    c = comparenodes(left.iftrue, right.iftrue)
+    if c != 0:
+        return c
+    return comparenodes(left.iffalse, right.iffalse)
+
+
+class NodeKey(object):
+    def __init__(self, node):
+        self.node = node
+
+    def __cmp__(self, other):
+        if not isinstance(other, NodeKey):
+            raise TypeError("Cannot compare NodeKey to %r of type %s" % (
+                other, type(other).__name__
+            ))
+        return comparenodes(self.node, other.node)
+
+    def __le__(self, other):
+        return self.__cmp__(other) <= 0
+
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __ge__(self, other):
+        return self.__cmp__(other) >= 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
+
+    def __eq__(self, other):
+        return isinstance(other, NodeKey) and self.node == other.node
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
 
 def gcd(a, *bs):

@@ -1,12 +1,12 @@
 from minisat import minisat
-from bddbuilder import BDDBuilder, CNFMapper
+from bddbuilder import DiagramBuilder, CNFMapper
 from expression import variable, Binary, is_arithmetic, Unary, Expression
 
 
 class Solver(object):
     def __init__(self, backend=minisat):
         self.backend = backend
-        self.builder = BDDBuilder()
+        self.builder = DiagramBuilder()
         self.names_to_indices = {}
         self.indices_to_names = []
         self.compile_cache = {}
@@ -18,7 +18,7 @@ class Solver(object):
         if bdd is False:
             raise Unsatisfiable()
         mapper = CNFMapper()
-        for v in bdd.variables:
+        for v in bdd.variables():
             mapper.remapped_variable(v)
         termvar = mapper.variable_for_term(bdd)
         cnf = list(mapper.cnf)
@@ -27,7 +27,7 @@ class Solver(object):
         if solution is None:
             raise Unsatisfiable()
         relevant_variables = [
-            (i, self.indices_to_names[i]) for i in bdd.variables]
+            (i, self.indices_to_names[i]) for i in bdd.variables()]
         return {
             name: mapper.remapped_variable(index) in solution
             for index, name in relevant_variables

@@ -1,11 +1,11 @@
-from bddbuilder import BDDBuilder, CNFMapper, BDD
+from bddbuilder import DiagramBuilder, CNFMapper
 from minisat import minisat
 import pytest
 from hypothesis import given, strategies as st, assume, example
 
 
 def test_normalize_and():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     y = builder.variable(1)
     z = builder.variable(2)
@@ -18,14 +18,14 @@ def test_normalize_and():
 
 
 def test_single_variable_reduction():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     assert builder.reduce(x, 0, True) is True
     assert builder.reduce(x, 0, False) is False
 
 
 def test_and_reduction():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     y = builder.variable(1)
     xandy = builder._and(x, y)
@@ -34,7 +34,7 @@ def test_and_reduction():
 
 
 def test_and_is_distinct():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     y = builder.variable(1)
     assert builder._and(x, y) != x
@@ -43,20 +43,20 @@ def test_and_is_distinct():
 
 @pytest.mark.parametrize('i', range(3))
 def test_reduce_and(i):
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder._and(*[builder.variable(i) for i in range(3)])
     assert builder.reduce(x, i, False) is False
 
 
 def test_unary_pbc():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     assert builder.pseudo_boolean_constraint([(1, x)], 0, 1) is True
     assert builder.pseudo_boolean_constraint([(2, x)], 0, 1) is builder._not(x)
 
 
 def test_binary_pbc():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     x = builder.variable(0)
     y = builder.variable(1)
     xandy = builder.pseudo_boolean_constraint(
@@ -75,7 +75,7 @@ def test_binary_pbc():
 
 @pytest.mark.parametrize('n', range(1, 10))
 def test_simple_pbc(n):
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     ts = [builder.variable(i) for i in range(n)]
     formula = [(1, t) for t in ts]
 
@@ -93,11 +93,11 @@ def test_simple_pbc(n):
     st.integers(), st.integers())
 def test_solutions_to_linear_constraints_satisfy_them(ls, m, n):
     assume(m <= n)
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     bdd = builder.pseudo_boolean_constraint(
         [(c, builder.variable(i)) for i, c in enumerate(ls)], m, n
     )
-    assume(isinstance(bdd, BDD))
+    assume(not isinstance(bdd, bool))
     mapper = CNFMapper()
     termvar = mapper.variable_for_term(bdd)
     cnf = list(mapper.cnf)
@@ -106,17 +106,17 @@ def test_solutions_to_linear_constraints_satisfy_them(ls, m, n):
     assume(solution is not None)
     assignment = {
         v: mapper.remapped_variable(v) in solution
-        for v in bdd.variables
+        for v in bdd.variables()
     }
     assert bdd.evaluate(assignment)
     score = sum(
-        s for i, s in enumerate(ls) if i in bdd.variables and assignment[i]
+        s for i, s in enumerate(ls) if i in bdd.variables() and assignment[i]
     )
     assert m <= score <= n
 
 
 def test_strict_equality_ruling_out_one_variable():
-    builder = BDDBuilder()
+    builder = DiagramBuilder()
     v0 = builder.variable(0)
     v1 = builder.variable(1)
     pbc = builder.pseudo_boolean_constraint([(2, v0), (1, v1)], 1, 1)
